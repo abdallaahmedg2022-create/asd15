@@ -40,6 +40,25 @@ st.markdown("""
         border: 1px solid #ffeaa7;
         margin: 10px 0;
     }
+    .info-box {
+        background-color: #d1ecf1;
+        padding: 15px;
+        border-radius: 5px;
+        border: 1px solid #bee5eb;
+        margin: 10px 0;
+    }
+    .status-present {
+        color: #28a745;
+        font-weight: bold;
+    }
+    .status-absent {
+        color: #007bff;
+        font-weight: bold;
+    }
+    .status-old-present {
+        color: #fd7e14;
+        font-weight: bold;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -127,8 +146,11 @@ def main():
     if 'is_admin' not in st.session_state:
         st.session_state.is_admin = False
     
-    if 'current_page' not in st.session_state:
-        st.session_state.current_page = "main"
+    if 'employee_status_checked' not in st.session_state:
+        st.session_state.employee_status_checked = False
+    
+    if 'current_emp_id' not in st.session_state:
+        st.session_state.current_emp_id = ""
     
     system = st.session_state.system
     
@@ -145,13 +167,31 @@ def show_login_page(system):
     """عرض صفحة تسجيل الدخول"""
     st.markdown("<h1 class='main-header'>نظام حضور وانصراف الموظفين</h1>", unsafe_allow_html=True)
     
+    # استخدام أعمدة لعرض واجهة الدخول
     col1, col2 = st.columns([1, 1])
     
     with col1:
         st.markdown("### دخول كموظف")
-        emp_id = st.text_input("كود الموظف", key="emp_login_id")
         
-        if st.button("دخول كموظف", type="primary", use_container_width=True):
+        # استخدم session_state لحفظ قيمة كود الموظف
+        if 'temp_emp_id' not in st.session_state:
+            st.session_state.temp_emp_id = ""
+        
+        # حقل إدخال كود الموظف مع تحديث تلقائي
+        emp_id = st.text_input("كود الموظف", 
+                              key="emp_login_id",
+                              value=st.session_state.temp_emp_id,
+                              on_change=lambda: update_employee_status(system))
+        
+        # حفظ القيمة في session_state
+        st.session_state.temp_emp_id = emp_id
+        
+        # عرض حالة الموظف تلقائياً
+        if emp_id:
+            show_employee_status_auto(system, emp_id)
+        
+        # زر الدخول
+        if st.button("دخول كموظف", type="primary", use_container_width=True, key="emp_login_btn"):
             if emp_id in system.employees:
                 st.session_state.logged_in = True
                 st.session_state.is_admin = False
@@ -172,98 +212,175 @@ def show_login_page(system):
             else:
                 st.error("كلمة السر غير صحيحة")
 
-def show_employee_page(system):
-    """عرض واجهة الموظف"""
-    st.markdown("<h1 class='main-header'>نظام الحضور والانصراف</h1>", unsafe_allow_html=True)
+def update_employee_status(system):
+    """تحديث حالة الموظف عند تغيير الكود"""
+    # هذه الدالة يتم استدعاؤها تلقائياً عند تغيير حقل الإدخال
+    st.session_state.employee_status_checked = True
+
+def show_employee_status_auto(system, emp_id):
+    """عرض حالة الموظف تلقائياً"""
+    if emp_id:
+        if emp_id in system.employees:
+            emp_name = system.employees[emp_id]['name']
+            
+            # التحقق من حالة الموظف
+            has_open, open_date = system.has_open_checkin(emp_id)
+            today = datetime.now().strftime('%Y-%m-%d')
+            
+            # عرض معلومات الموظف
+            st.markdown(f"**الاسم:** {emp_name}")
+            
+            if has_open:
+                if open_date == today:
+                    # متحضر اليوم
+                    st.markdown('<div class="success-box">'
+                               '<strong>الحالة:</strong> <span class="status-present">متحضر اليوم</span><br>'
+                               '<strong>التاريخ:</strong> ' + open_date +
+                               '</div>', unsafe_allow_html=True)
+                    
+                    # عرض زر الانصراف فقط
+                    if st.button("تسجيل الانصراف", type="primary", use_container_width=True, key="auto_checkout"):
+                        check_out_employee_auto(system, emp_id, open_date)
+                else:
+                    # متحضر من يوم سابق
+                    st.markdown('<div class="warning-box">'
+                               '<strong>الحالة:</strong> <span class="status-old-present">متحضر من يوم سابق</span><br>'
+                               '<strong>التاريخ:</strong> ' + open_date +
+                               '</div>', unsafe_allow_html=True)
+                    
+                    # عرض زر الانصراف فقط
+                    if st.button("تسجيل الانصراف (إغلاق الجلسة القديمة)", type="primary", use_container_width=True, key="auto_checkout_old"):
+                        check_out_employee_auto(system, emp_id, open_date)
+            else:
+                # منصرف
+                st.markdown('<div class="info-box">'
+                           '<strong>الحالة:</strong> <span class="status-absent">منصرف</span>' +
+                           '</div>', unsafe_allow_html=True)
+                
+                # عرض زر الحضور فقط
+                if st.button("تسجيل الحضور", type="primary", use_container_width=True, key="auto_checkin"):
+                    check_in_employee_auto(system, emp_id)
+        else:
+            st.warning("⚠️ كود الموظف غير مسجل")
+
+def check_in_employee_auto(system, emp_id):
+    """تسجيل الحضور تلقائياً"""
+    today = datetime.now().strftime('%Y-%m-%d')
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-    # زر العودة
-    if st.button("← العودة للصفحة الرئيسية"):
-        st.session_state.logged_in = False
+    system.attendance[today][emp_id].append({
+        'check_in': now,
+        'check_out': ''
+    })
+    
+    system.save_data()
+    st.success("✅ تم تسجيل الحضور بنجاح")
+    st.session_state.employee_status_checked = True
+    st.rerun()
+
+def check_out_employee_auto(system, emp_id, open_date):
+    """تسجيل الانصراف تلقائياً"""
+    found_record = None
+    
+    if open_date in system.attendance and emp_id in system.attendance[open_date]:
+        for record in reversed(system.attendance[open_date][emp_id]):
+            if record['check_in'] and not record['check_out']:
+                found_record = record
+                break
+    
+    if found_record:
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        found_record['check_out'] = now
+        system.save_data()
+        
+        if open_date != datetime.now().strftime('%Y-%m-%d'):
+            st.success(f"✅ تم تسجيل الانصراف بنجاح\nتم إغلاق جلسة الحضور من تاريخ {open_date}")
+        else:
+            st.success("✅ تم تسجيل الانصراف بنجاح")
+        
+        st.session_state.employee_status_checked = True
         st.rerun()
-    
+    else:
+        st.error("حدث خطأ في العثور على سجل الحضور")
+
+def show_employee_page(system):
+    """عرض واجهة الموظف (الصفحة الرئيسية بعد الدخول)"""
     emp_id = st.session_state.current_emp_id
     emp_name = system.employees[emp_id]['name']
     
-    st.markdown(f"### مرحباً، {emp_name} ({emp_id})")
+    st.markdown(f"<h1 class='main-header'>مرحباً، {emp_name} ({emp_id})</h1>", unsafe_allow_html=True)
     
-    # التحقق من حالة الموظف
-    has_open, open_date = system.has_open_checkin(emp_id)
+    # زر العودة
+    if st.button("← تسجيل الخروج والعودة للصفحة الرئيسية"):
+        st.session_state.logged_in = False
+        st.session_state.current_emp_id = ""
+        st.rerun()
     
+    # عرض حالة الموظف في الصفحة الرئيسية
+    show_employee_status_main(system, emp_id)
+    
+    # عرض سجلات الحضور
     col1, col2 = st.columns(2)
     
     with col1:
-        if has_open:
-            if open_date == datetime.now().strftime('%Y-%m-%d'):
-                st.markdown("""
-                <div class='warning-box'>
-                    <strong>الحالة:</strong> متحضر اليوم
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown(f"""
-                <div class='warning-box'>
-                    <strong>الحالة:</strong> متحضر من {open_date}
-                </div>
-                """, unsafe_allow_html=True)
-            
-            if st.button("تسجيل الانصراف", type="primary", use_container_width=True):
-                check_out_employee(system, emp_id)
-        else:
-            st.markdown("""
-            <div class='success-box'>
-                <strong>الحالة:</strong> منصرف
-            </div>
-            """, unsafe_allow_html=True)
-            
-            if st.button("تسجيل الحضور", type="primary", use_container_width=True):
-                check_in_employee(system, emp_id)
+        st.markdown("### سجل الحضور اليومي")
+        show_daily_attendance(system, emp_id)
     
     with col2:
-        st.markdown("### سجل الحضور اليومي")
-        today = datetime.now().strftime('%Y-%m-%d')
-        
-        if today in system.attendance and emp_id in system.attendance[today]:
-            records = system.attendance[today][emp_id]
-            data = []
-            
-            for i, record in enumerate(records, 1):
-                check_in = record.get('check_in', '')
-                check_out = record.get('check_out', '')
-                hours = ''
-                
-                if check_in and check_out:
-                    try:
-                        time_in = datetime.strptime(check_in, '%Y-%m-%d %H:%M:%S')
-                        time_out = datetime.strptime(check_out, '%Y-%m-%d %H:%M:%S')
-                        delta = time_out - time_in
-                        hours = f"{round(delta.total_seconds() / 3600, 2)} ساعة"
-                    except ValueError:
-                        hours = ''
-                
-                data.append({
-                    'التسجيل': i,
-                    'وقت الحضور': check_in,
-                    'وقت الانصراف': check_out,
-                    'المدة': hours
-                })
-            
-            if data:
-                st.dataframe(pd.DataFrame(data), use_container_width=True)
-            else:
-                st.info("لا توجد سجلات حضور لهذا اليوم")
+        st.markdown("### سجل الحضور لهذا الأسبوع")
+        weekly_data = get_weekly_attendance(system, emp_id)
+        if not weekly_data.empty:
+            st.dataframe(weekly_data, use_container_width=True)
         else:
-            st.info("لا توجد سجلات حضور لهذا اليوم")
-    
-    # عرض سجل الحضور الأسبوعي
-    st.markdown("### سجل الحضور لهذا الأسبوع")
-    weekly_data = get_weekly_attendance(system, emp_id)
-    if not weekly_data.empty:
-        st.dataframe(weekly_data, use_container_width=True)
-    else:
-        st.info("لا توجد سجلات حضور لهذا الأسبوع")
+            st.info("لا توجد سجلات حضور لهذا الأسبوع")
 
-def check_in_employee(system, emp_id):
-    """تسجيل الحضور"""
+def show_employee_status_main(system, emp_id):
+    """عرض حالة الموظف في الصفحة الرئيسية"""
+    has_open, open_date = system.has_open_checkin(emp_id)
+    today = datetime.now().strftime('%Y-%m-%d')
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        if has_open:
+            if open_date == today:
+                st.markdown('<div class="warning-box">'
+                           '<h4>🎯 الحالة الحالية</h4>'
+                           '<p><strong>الحالة:</strong> <span class="status-present">متحضر اليوم</span></p>'
+                           '<p><strong>وقت الحضور:</strong> ' + get_last_checkin_time(system, emp_id, open_date) + '</p>'
+                           '</div>', unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="warning-box">'
+                           '<h4>🎯 الحالة الحالية</h4>'
+                           '<p><strong>الحالة:</strong> <span class="status-old-present">متحضر من يوم سابق</span></p>'
+                           '<p><strong>من تاريخ:</strong> ' + open_date + '</p>'
+                           '<p><strong>وقت الحضور:</strong> ' + get_last_checkin_time(system, emp_id, open_date) + '</p>'
+                           '</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="success-box">'
+                       '<h4>🎯 الحالة الحالية</h4>'
+                       '<p><strong>الحالة:</strong> <span class="status-absent">منصرف</span></p>'
+                       '<p>يمكنك تسجيل الحضور عندما تبدأ عملك</p>'
+                       '</div>', unsafe_allow_html=True)
+    
+    with col2:
+        if has_open:
+            if st.button("🔄 تسجيل الانصراف", type="primary", use_container_width=True, key="main_checkout"):
+                check_out_employee_main(system, emp_id, open_date)
+        else:
+            if st.button("✅ تسجيل الحضور", type="primary", use_container_width=True, key="main_checkin"):
+                check_in_employee_main(system, emp_id)
+
+def get_last_checkin_time(system, emp_id, date):
+    """الحصول على آخر وقت حضور"""
+    if date in system.attendance and emp_id in system.attendance[date]:
+        for record in reversed(system.attendance[date][emp_id]):
+            if record.get('check_in') and not record.get('check_out'):
+                return record['check_in']
+    return "غير معروف"
+
+def check_in_employee_main(system, emp_id):
+    """تسجيل الحضور من الصفحة الرئيسية"""
     today = datetime.now().strftime('%Y-%m-%d')
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
@@ -276,19 +393,14 @@ def check_in_employee(system, emp_id):
     st.success("✅ تم تسجيل الحضور بنجاح")
     st.rerun()
 
-def check_out_employee(system, emp_id):
-    """تسجيل الانصراف"""
+def check_out_employee_main(system, emp_id, open_date):
+    """تسجيل الانصراف من الصفحة الرئيسية"""
     found_record = None
-    found_date = None
     
-    for date in sorted(system.attendance.keys(), reverse=True):
-        if emp_id in system.attendance[date]:
-            for record in reversed(system.attendance[date][emp_id]):
-                if record['check_in'] and not record['check_out']:
-                    found_record = record
-                    found_date = date
-                    break
-            if found_record:
+    if open_date in system.attendance and emp_id in system.attendance[open_date]:
+        for record in reversed(system.attendance[open_date][emp_id]):
+            if record['check_in'] and not record['check_out']:
+                found_record = record
                 break
     
     if found_record:
@@ -296,14 +408,67 @@ def check_out_employee(system, emp_id):
         found_record['check_out'] = now
         system.save_data()
         
-        if found_date != datetime.now().strftime('%Y-%m-%d'):
-            st.success(f"✅ تم تسجيل الانصراف بنجاح\nتم إغلاق جلسة الحضور من تاريخ {found_date}")
+        if open_date != datetime.now().strftime('%Y-%m-%d'):
+            st.success(f"✅ تم تسجيل الانصراف بنجاح\nتم إغلاق جلسة الحضور من تاريخ {open_date}")
         else:
             st.success("✅ تم تسجيل الانصراف بنجاح")
         
         st.rerun()
     else:
-        st.error("لا يوجد حضور مسجل يحتاج إلى انصراف")
+        st.error("حدث خطأ في العثور على سجل الحضور")
+
+def show_daily_attendance(system, emp_id):
+    """عرض سجل الحضور اليومي"""
+    today = datetime.now().strftime('%Y-%m-%d')
+    
+    if today in system.attendance and emp_id in system.attendance[today]:
+        records = system.attendance[today][emp_id]
+        data = []
+        
+        for i, record in enumerate(records, 1):
+            check_in = record.get('check_in', '')
+            check_out = record.get('check_out', '')
+            hours = ''
+            
+            if check_in and check_out:
+                try:
+                    time_in = datetime.strptime(check_in, '%Y-%m-%d %H:%M:%S')
+                    time_out = datetime.strptime(check_out, '%Y-%m-%d %H:%M:%S')
+                    delta = time_out - time_in
+                    hours = f"{round(delta.total_seconds() / 3600, 2)} ساعة"
+                except ValueError:
+                    hours = ''
+            
+            data.append({
+                'التسجيل': i,
+                'وقت الحضور': check_in,
+                'وقت الانصراف': check_out,
+                'المدة': hours
+            })
+        
+        if data:
+            st.dataframe(pd.DataFrame(data), use_container_width=True)
+            
+            # حساب إجمالي ساعات اليوم
+            total_hours = 0
+            for record in records:
+                check_in = record.get('check_in', '')
+                check_out = record.get('check_out', '')
+                
+                if check_in and check_out:
+                    try:
+                        time_in = datetime.strptime(check_in, '%Y-%m-%d %H:%M:%S')
+                        time_out = datetime.strptime(check_out, '%Y-%m-%d %H:%M:%S')
+                        delta = time_out - time_in
+                        total_hours += delta.total_seconds() / 3600
+                    except ValueError:
+                        pass
+            
+            st.markdown(f"**إجمالي ساعات العمل اليوم:** {round(total_hours, 2)} ساعة")
+        else:
+            st.info("لا توجد سجلات حضور لهذا اليوم")
+    else:
+        st.info("لا توجد سجلات حضور لهذا اليوم")
 
 def get_weekly_attendance(system, emp_id):
     """الحصول على سجل الحضور الأسبوعي"""
@@ -337,13 +502,19 @@ def get_weekly_attendance(system, emp_id):
     
     return pd.DataFrame(data[::-1]) if data else pd.DataFrame()
 
+# باقي الدوال (show_admin_page, manage_employees, daily_reports, monthly_reports, export_reports)
+# تظل كما هي بدون تغيير...
+
+# ... [بقية الكود يبقى كما هو بدون تغيير] ...
+
 def show_admin_page(system):
     """عرض واجهة المدير"""
     st.markdown("<h1 class='main-header'>واجهة المدير</h1>", unsafe_allow_html=True)
     
     # زر العودة
-    if st.button("← العودة للصفحة الرئيسية"):
+    if st.button("← تسجيل الخروج والعودة للصفحة الرئيسية"):
         st.session_state.logged_in = False
+        st.session_state.is_admin = False
         st.rerun()
     
     # تبويبات واجهة المدير
@@ -638,9 +809,12 @@ def export_daily_pdf(system, date_str):
         pdf = FPDF()
         pdf.add_page()
         
-        # إضافة النص العربي (قد تحتاج لتثبيت خط عربي)
-        pdf.add_font('DejaVu', '', 'DejaVuSans.ttf', uni=True)
-        pdf.set_font('DejaVu', '', 12)
+        # إضافة النص العربي
+        try:
+            pdf.add_font('Arial', '', 'arial.ttf', uni=True)
+            pdf.set_font('Arial', '', 12)
+        except:
+            pdf.set_font('Arial', '', 12)
         
         pdf.cell(0, 10, f"تقرير الحضور اليومي - {date_str}", 0, 1, 'C')
         pdf.ln(10)
@@ -760,14 +934,11 @@ def export_daily_excel(system, date_str):
 
 def export_monthly_pdf(system, start_date, end_date, emp_id):
     """تصدير التقرير الشهري كـ PDF"""
-    # تنفيذ مشابه لـ export_daily_pdf لكن للفترة الشهرية
     st.info("خاصية التصدير الشهري كـ PDF قيد التطوير")
-    # يمكنك إضافة التنفيذ الكامل هنا
 
 def export_monthly_excel(system, start_date, end_date, emp_id):
     """تصدير التقرير الشهري كـ Excel"""
     st.info("خاصية التصدير الشهري كـ Excel قيد التطوير")
-    # يمكنك إضافة التنفيذ الكامل هنا
 
 if __name__ == "__main__":
     main()
