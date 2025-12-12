@@ -1,5 +1,2 @@
-pandas
-gspread
-google-auth
-fpdf
-openpyxl
+pip install streamlit pandas gspread google-auth openpyxl
+   streamlit run app.py
